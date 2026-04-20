@@ -33,6 +33,43 @@
 - 💾 **灵活的索引**: 支持文档索引构建和加载，提高检索效率
 - 📈 **全面评估**: 提供Recall、Precision、MRR、MAP等多种评估指标
 
+## 📋 TODO 列表
+
+<div align="center">
+
+### 🔥 高优先级任务
+
+| 任务 | 状态 | 负责人 | 截止日期 |
+|------|------|--------|----------|
+| 实现Next Sentence生成模块 | ⏳ 进行中 | @longtaizi13579 | 待定 |
+| 完善答案生成功能 | ⏳ 进行中 | @longtaizi13579 | 待定 |
+| 添加更多数据集支持 | 📝 计划中 | @longtaizi13579 | 待定 |
+| 优化检索性能 | 📝 计划中 | @longtaizi13579 | 待定 |
+
+### 🎯 中期目标
+
+- [ ] 实现自动化的Next Sentence生成
+- [ ] 添加答案生成和评估功能
+- [ ] 支持更多多跳问答数据集（如HotpotQA fullwiki）
+- [ ] 优化文档索引和检索效率
+- [ ] 添加更多评估指标和可视化
+
+### 🚀 长期规划
+
+- [ ] 支持分布式检索和大规模文档库
+- [ ] 实现在线学习和持续优化
+- [ ] 添加Web界面和API服务
+- [ ] 发布预训练模型和demo
+
+### 💡 改进建议
+
+- [ ] 添加单元测试和集成测试
+- [ ] 完善文档和示例代码
+- [ ] 优化代码结构和可读性
+- [ ] 添加更多配置选项和参数调优
+
+</div>
+
 ## 📁 目录结构
 
 ```
@@ -42,7 +79,7 @@
 ├── ircot_evaluation.py                # 评估脚本
 ├── dataset_loading.py                 # 数据加载
 ├── loss_utils.py                      # 损失函数
-├── ircot.sh                           # 评估脚本示例
+├── pipeline_evaluation.sh                           # 评估脚本示例
 ├── va_deepspeed_stage_new.json        # DeepSpeed配置
 ├── results/                           # 结果目录
 └── wiki_train/                        # 训练日志
@@ -92,7 +129,7 @@ python multihop_contrastive_train.py     --model_name Qwen/Qwen3-0.6B     --spli
 
 ```bash
 # 使用提供的shell脚本
-bash ircot.sh
+bash pipeline_evaluation.sh
 
 # 或直接运行Python脚本
 python ircot_evaluation.py     --model_path ./checkpoints/global_step199     --dataset_name musique     --split train     --tokenizer_path Qwen/Qwen3-0.6B     --index_path ./results/musique_document_index.pt     --output_dir ./results
@@ -140,20 +177,145 @@ graph LR
 
 ## 🎯 代理式搜索评估 (Agentic Search Pipeline Evaluation)
 
-### 评估流程
+### IRCOT风格的多跳检索流程
 
-IRCOT风格的多跳检索评估流程如下：
+IRCOT（Interleaving Retrieval with Chain-of-Thought）风格的多跳检索评估流程模拟了人类在回答复杂问题时的推理过程：通过多轮检索逐步收集信息，直到找到足够的知识来回答问题。
+
+#### 完整流程详解
 
 ```mermaid
 graph TD
-    A[加载训练模型] --> B[构建/加载文档索引]
-    B --> C[执行多跳检索]
-    C --> D{是否完成所有跳?}
-    D -->|否| E[执行下一跳检索]
-    E --> C
-    D -->|是| F[计算性能指标]
-    F --> G[生成评估报告]
+    Start[开始评估] --> LoadModel[加载训练好的检索模型]
+    LoadModel --> LoadIndex[构建/加载文档索引]
+    LoadIndex --> GetQuery[获取待评估的查询]
+    GetQuery --> Hop1[第一跳检索]
+
+    Hop1 --> EncodeQuery1[使用query模式编码原始查询]
+    EncodeQuery1 --> Retrieve1[从文档库中检索top-k文档]
+    Retrieve1 --> CollectDocs1[收集第一跳检索到的文档]
+
+    CollectDocs1 --> CheckEnough{是否收集到足够的文档?}
+    CheckEnough -->|否| GenerateNext1[基于已检索文档生成next sentence]
+    GenerateNext1 --> Hop2[第二跳检索]
+
+    Hop2 --> EncodeQuery2[编码原始查询 + 已检索文档内容]
+    EncodeQuery2 --> Retrieve2[检索新的top-k文档]
+    Retrieve2 --> CollectDocs2[合并新检索到的文档]
+    CollectDocs2 --> CheckEnough
+
+    CheckEnough -->|是| GenerateAnswer[基于所有检索到的文档生成答案]
+    GenerateAnswer --> EvaluateMetrics[计算评估指标]
+    EvaluateMetrics --> NextQuery{还有其他查询?}
+    NextQuery -->|是| GetQuery
+    NextQuery -->|否| GenerateReport[生成评估报告]
+    GenerateReport --> End[结束]
 ```
+
+#### 详细步骤说明
+
+**第一跳检索（First Hop）**
+
+1. **接收查询**: 系统接收用户的原始查询，例如："谁是美国第一位女性最高法院大法官？"
+
+2. **查询编码**: 使用InforNCE_and_Generative_Hops_Eval模型的query模式对原始查询进行编码：
+   ```python
+   query_embedding = model(
+       input_ids=query_input_ids,
+       attention_mask=query_attention_mask,
+       is_query=True  # 使用query模式，会添加prefix
+   )
+   ```
+   - query模式会在查询前添加特殊的prefix token
+   - 使用EncoderWrapperSupervisedAppendN进行编码
+   - 返回归一化的查询向量
+
+3. **文档检索**: 使用查询向量在文档索引中检索最相关的top-k个文档：
+   ```python
+   scores = query_embedding @ document_embeddings.T
+   top_k_docs = get_top_k(scores, k=10)
+   ```
+   - 计算查询向量与所有文档向量的余弦相似度
+   - 返回相似度最高的top-k个文档
+
+4. **收集文档**: 将检索到的文档保存到文档集合中：
+   ```python
+   collected_docs = top_k_docs
+   ```
+
+**中间跳检索（Intermediate Hops）**
+
+如果第一跳检索到的文档不足以回答问题，系统会继续执行后续跳的检索：
+
+1. **生成Next Sentence**: 基于已检索到的文档内容，生成用于下一跳检索的查询：
+   ```python
+   next_sentence = generate_next_sentence(
+       original_query=query,
+       retrieved_docs=collected_docs
+   )
+   ```
+   - 分析已检索文档的内容
+   - 识别缺失的信息
+   - 生成新的查询以获取缺失信息
+
+2. **构建增强查询**: 将原始查询和已检索文档的内容组合：
+   ```python
+   enhanced_query = f"{query} [SEP] {' '.join(collected_docs)}"
+   ```
+
+3. **编码增强查询**: 使用query模式编码增强后的查询：
+   ```python
+   enhanced_embedding = model(
+       input_ids=enhanced_query_ids,
+       attention_mask=enhanced_query_mask,
+       is_query=True
+   )
+   ```
+
+4. **检索新文档**: 使用增强查询检索新的文档：
+   ```python
+   new_scores = enhanced_embedding @ document_embeddings.T
+   new_docs = get_top_k(new_scores, k=10)
+   ```
+
+5. **合并文档**: 将新检索到的文档与已有文档合并，并去重：
+   ```python
+   collected_docs = merge_and_deduplicate(collected_docs, new_docs)
+   ```
+
+**终止条件**
+
+系统会在以下情况停止检索：
+
+1. **达到最大跳数**: 当检索跳数达到`max_hops`参数设定的值（默认为3）
+2. **找到足够文档**: 当收集到的文档数量或质量满足预设条件
+3. **信息充足**: 当检索到的文档包含足够的信息来回答问题
+
+**答案生成**
+
+当检索停止后，系统会基于所有收集到的文档生成最终答案：
+
+```python
+answer = generate_answer(
+    query=original_query,
+    documents=collected_docs
+)
+```
+
+**评估指标计算**
+
+系统会计算以下评估指标：
+
+1. **文档级指标**:
+   - Recall@k: 前k个结果中相关文档的召回率
+   - Precision@k: 前k个结果的精确率
+   - MRR: 平均倒数排名
+   - MAP: 平均精确率均值
+
+2. **答案级指标**（如果生成答案）:
+   - EM (Exact Match): 精确匹配
+   - F1 Score: F1分数
+
+### 评估流程概要
 
 1. 📥 **加载模型**: 加载训练好的检索模型
 2. 🗂️ **构建索引**: 构建或加载文档索引
@@ -261,10 +423,3 @@ results/
 
 ---
 
-<div align="center">
-
-**如果这个项目对您有帮助，请给个 ⭐️ 支持一下！**
-
-Made with ❤️ by Your Team
-
-</div>
