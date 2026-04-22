@@ -311,7 +311,7 @@ class MultiHopQAEvaluator:
         
         for example in self.dataset:
             for title, text in zip(example["candidates"], example["candidate_texts"]):
-                doc_key = _normalize_text(title)
+                doc_key = title
                 if doc_key not in seen_docs:
                     seen_docs.add(doc_key)
                     all_documents.append({"title": title, "text": text})
@@ -348,8 +348,11 @@ class MultiHopQAEvaluator:
                 hf_repo = self.config.hf_repo or "hotpotqa/hotpotqa-distractor"
             else:  # fullwiki
                 hf_repo = self.config.hf_repo or "hotpotqa/hotpotqa-fullwiki"
-            ds = load_dataset(hf_repo, split=self.config.split)
-            data = [dict(x) for x in ds]
+            ds1 = load_dataset(hf_repo, split="train")
+            ds2 = load_dataset(hf_repo, split="validation")
+            data1 = [dict(x) for x in ds1]
+            data2 = [dict(x) for x in ds2]
+            data = data1 + data2
 
         # Process each item
         processed_data = []
@@ -366,8 +369,11 @@ class MultiHopQAEvaluator:
                 data = json.load(f) if self.config.local_data_path.endswith('.json') else [json.loads(line) for line in f]
         else:
             hf_repo = self.config.hf_repo or "framolfese/2WikiMultihopQA"
-            ds = load_dataset(hf_repo, split=self.config.split)
-            data = [dict(x) for x in ds]
+            ds1 = load_dataset(hf_repo, split="train")
+            ds2 = load_dataset(hf_repo, split="validation")
+            data1 = [dict(x) for x in ds1]
+            data2 = [dict(x) for x in ds2]
+            data = data1 + data2
 
         # Process each item
         processed_data = []
@@ -384,9 +390,11 @@ class MultiHopQAEvaluator:
                 data = [json.loads(line) for line in f]
         else:
             hf_repo = self.config.hf_repo or "dgslibisey/MuSiQue"
-            ds = load_dataset(hf_repo, split=self.config.split)
-            data = [dict(x) for x in ds]
-
+            ds1 = load_dataset(hf_repo, split="train")
+            ds2 = load_dataset(hf_repo, split="validation")
+            data1 = [dict(x) for x in ds1]
+            data2 = [dict(x) for x in ds2]
+            data = data1 + data2
 
         # Process each item
         processed_data = []
@@ -417,12 +425,12 @@ class MultiHopQAEvaluator:
         # Map support titles to indices
         title_to_indices = defaultdict(list)
         for idx, title in enumerate(titles):
-            title_to_indices[_normalize_text(title)].append(idx)
+            title_to_indices[title].append(idx)
         
         # Get positive set (indices of supporting paragraphs)
         positive_set = []
         for title in support_titles:
-            hits = title_to_indices.get(_normalize_text(title), [])
+            hits = title_to_indices.get(title, [])
             if len(hits) >= 1:
                 positive_set.append(hits[0])
         positive_set = _ordered_unique(positive_set)
@@ -466,11 +474,11 @@ class MultiHopQAEvaluator:
 
         title_to_indices = defaultdict(list)
         for idx, title in enumerate(titles):
-            title_to_indices[_normalize_text(title)].append(idx)
+            title_to_indices[title].append(idx)
 
         positive_set = []
         for title in support_titles:
-            hits = title_to_indices.get(_normalize_text(title), [])
+            hits = title_to_indices.get(title, [])
             if len(hits) >= 1:
                 positive_set.append(hits[0])
         positive_set = _ordered_unique(positive_set)
@@ -601,25 +609,22 @@ class MultiHopQAEvaluator:
         # Use indexer if available
         if self.config.use_indexing and self.indexer.document_embeddings is not None:
             # Retrieve from global index
-            global_indices, scores = self.indexer.retrieve(query_text)
+            global_indices, scores = self.indexer.retrieve(query_text, top_k=10)
             
             # Map global indices back to candidate indices
-            title_to_idx = {_normalize_text(title): idx for idx, title in enumerate(candidate_titles)}
-            candidate_indices = []
-            candidate_scores = []
-            
-            for g_idx, score in zip(global_indices, scores):
-                if g_idx < len(self.indexer.documents):
-                    doc_title = self.indexer.documents[g_idx]["title"]
-                    c_idx = title_to_idx.get(_normalize_text(doc_title))
-                    if c_idx is not None:
-                        candidate_indices.append(c_idx)
-                        candidate_scores.append(score)
-                
-                if len(candidate_indices) >= self.config.max_retrieved_docs:
-                    break
-            
-            return candidate_indices, candidate_scores
+            # title_to_idx = {title: idx for idx, title in enumerate(candidate_titles)}
+            # candidate_indices = []
+            # candidate_scores = []
+            # for g_idx, score in zip(global_indices, scores):
+            #     if g_idx < len(self.indexer.documents):
+            #         doc_title = self.indexer.documents[g_idx]["title"]
+            #         c_idx = title_to_idx.get(doc_title)
+            #         if c_idx is not None:
+            #             candidate_indices.append(c_idx)
+            #             candidate_scores.append(score)
+            #     if len(candidate_indices) >= self.config.max_retrieved_docs:
+            #        break
+            return global_indices, scores 
         
         # Fallback to original method if indexer not available
         # Build candidate texts
@@ -707,7 +712,6 @@ class MultiHopQAEvaluator:
         retrieved_indices = []
         retrieved_scores = []
         retrieved_texts = []
-
         for hop_idx in range(self.config.max_hops):
             # Retrieve documents for current hop
             top_indices, scores = self.retrieve_documents(
@@ -724,21 +728,22 @@ class MultiHopQAEvaluator:
             # Build retrieved texts for next hop
             hop_retrieved_texts = []
             for idx in top_indices:
-                if idx < len(candidate_texts):
-                    doc_text = self._build_doc_text(
-                        candidate_titles[idx],
-                        candidate_texts[idx]
-                    )
-                    hop_retrieved_texts.append(doc_text)
-                    retrieved_texts.append(doc_text)
+                doc_text = self._build_doc_text(
+                    self.indexer.documents[idx]["title"],
+                    self.indexer.documents[idx]["text"]
+                )
+                hop_retrieved_texts.extend(doc_text)
+                retrieved_texts.extend(doc_text)
 
-            retrieved_docs.append(hop_retrieved_texts)
+            retrieved_docs.extend(hop_retrieved_texts)
 
         # Compute metrics
         metrics = self._compute_metrics(
             retrieved_indices=retrieved_indices,
             gold_docs=gold_docs,
             hop_order=hop_order,
+            candidate_texts=candidate_texts,
+            candidate_titles=candidate_titles,
             total_candidates=len(candidate_texts)
         )
 
@@ -757,15 +762,19 @@ class MultiHopQAEvaluator:
         retrieved_indices: List[List[int]],
         gold_docs: List[int],
         hop_order: Optional[List[int]],
+        candidate_texts: List[str],
+        candidate_titles: List[str],
         total_candidates: int
     ) -> Dict[str, float]:
         """
         Compute retrieval metrics.
 
         Args:
-            retrieved_indices: List of retrieved document indices for each hop
-            gold_docs: Ground truth document indices
-            hop_order: Ground truth hop order
+            retrieved_indices: List of retrieved document indices for each hop (global indices from self.indexer.documents)
+            gold_docs: Ground truth document indices (local indices in candidates)
+            hop_order: Ground truth hop order (local indices in candidates)
+            candidate_texts: List of candidate document texts
+            candidate_titles: List of candidate document titles
             total_candidates: Total number of candidate documents
 
         Returns:
@@ -773,31 +782,46 @@ class MultiHopQAEvaluator:
         """
         metrics = {}
 
-        # Flatten retrieved indices across all hops
-        all_retrieved = []
+        # Create mapping from candidate title to local index
+        title_to_local_idx = {title: idx for idx, title in enumerate(candidate_titles)}
+
+        # Create mapping from global index to local index
+        global_to_local_idx = {}
+        for local_idx, (title, text) in enumerate(zip(candidate_titles, candidate_texts)):
+            # Find the global index for this document
+            for global_idx, doc in enumerate(self.indexer.documents):
+                if doc["title"] == title and doc["text"] == text:
+                    global_to_local_idx[global_idx] = local_idx
+                    break
+
+        # Flatten retrieved indices across all hops and convert to local indices
+        all_retrieved_local = []
         for hop_indices in retrieved_indices:
-            all_retrieved.extend(hop_indices)
+            for global_idx in hop_indices:
+                if global_idx in global_to_local_idx:
+                    local_idx = global_to_local_idx[global_idx]
+                    all_retrieved_local.append(local_idx)
 
         # Remove duplicates while preserving order
-        unique_retrieved = []
+        unique_retrieved_local = []
         seen = set()
-        for idx in all_retrieved:
+        for idx in all_retrieved_local:
             if idx not in seen:
                 seen.add(idx)
-                unique_retrieved.append(idx)
+                unique_retrieved_local.append(idx)
 
         # Recall@k metrics
         for k in [1, 3, 5, 10]:
-            if k <= len(unique_retrieved):
-                retrieved_k = set(unique_retrieved[:k])
+            if k <= len(unique_retrieved_local):
+                retrieved_k = set(unique_retrieved_local[:k])
                 gold_set = set(gold_docs)
                 recall = len(retrieved_k & gold_set) / len(gold_set) if gold_set else 0.0
                 metrics[f"recall@{k}"] = recall
 
         # Precision@k metrics
         for k in [1, 3, 5, 10]:
-            if k <= len(unique_retrieved):
-                retrieved_k = set(unique_retrieved[:k])
+            if k <= len(unique_retrieved_local):
+                retrieved_k = set(unique_retrieved_local[:k])
                 gold_set = set(gold_docs)
                 precision = len(retrieved_k & gold_set) / k if k > 0 else 0.0
                 metrics[f"precision@{k}"] = precision
@@ -805,7 +829,7 @@ class MultiHopQAEvaluator:
         # Mean Reciprocal Rank (MRR)
         mrr = 0.0
         for gold_doc in gold_docs:
-            for rank, idx in enumerate(unique_retrieved, start=1):
+            for rank, idx in enumerate(unique_retrieved_local, start=1):
                 if idx == gold_doc:
                     mrr += 1.0 / rank
                     break
@@ -822,8 +846,8 @@ class MultiHopQAEvaluator:
                     doc_j = hop_order[j]
 
                     # Check if the order is preserved in retrieval
-                    rank_i = unique_retrieved.index(doc_i) if doc_i in unique_retrieved else -1
-                    rank_j = unique_retrieved.index(doc_j) if doc_j in unique_retrieved else -1
+                    rank_i = unique_retrieved_local.index(doc_i) if doc_i in unique_retrieved_local else -1
+                    rank_j = unique_retrieved_local.index(doc_j) if doc_j in unique_retrieved_local else -1
 
                     if rank_i >= 0 and rank_j >= 0 and rank_i < rank_j:
                         correct_order += 1
@@ -848,7 +872,7 @@ class MultiHopQAEvaluator:
             result = self.evaluate_example(example)
             all_results.append(result)
             all_metrics.append(result["metrics"])
-
+            print()
         # Aggregate metrics
         aggregated_metrics = self._aggregate_metrics(all_metrics)
 
