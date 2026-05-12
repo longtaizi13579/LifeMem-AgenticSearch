@@ -618,17 +618,39 @@ def construct_multihop_step_dataset(
         for step_idx, gold_doc_idx in enumerate(hop_order):
             # 获取当前步骤的文档文本
             current_doc_text = _build_doc_text(gold_doc_idx)
-
+            # 选择hard negatives: 从paragraphs中除正例外的其他paragraph
+            # 获取所有非正例的文档索引
+            all_indices = set(range(len(candidates)))
+            positive_indices = set(hop_order)  # 包括当前步骤的正例
+            negative_indices = list(all_indices - positive_indices)
+            number_docs = random.randint(4, len(negative_indices)) if len(negative_indices) < 12 else random.randint(4, 12)
+            concate_selected_negatives = random.sample(negative_indices, number_docs)
+            
             # 构建输入：第一个step是query本身，后续step是query+前续order的document内容
             if step_idx == 0:
                 # 第一个step的输入是query本身
-                input_text = query
+                input_text = f"<query>: {query}"
             else:
                 # 后续step的输入是query+前续order的document内容
                 prev_docs = []
                 for prev_idx in hop_order[:step_idx]:
-                    prev_docs.append(_build_doc_text(prev_idx))
-                input_text = f"{query} {' '.join(prev_docs)}"
+                    negative_nums = random.randint(1, 2)
+                    now_negatives = random.sample(concate_selected_negatives, negative_nums)
+                    pos_site = random.randint(0, len(now_negatives))
+                    now_docs = [0] * (len(now_negatives) + 1)
+                    ptr = 0
+                    for every_negative in now_negatives:
+                        if ptr ==  pos_site:
+                            now_docs[ptr] = _build_doc_text(prev_idx) 
+                            ptr += 1
+                        now_docs[ptr] = _build_doc_text(every_negative) 
+                        ptr += 1
+                        if ptr ==  pos_site:
+                            now_docs[ptr] = _build_doc_text(prev_idx) 
+                            ptr += 1
+                    info = '<document>'.join(now_docs)
+                    prev_docs.append(info + '</document>')
+                input_text = f"<query>: {query} {'<document>'.join(prev_docs)}"
 
             # Tokenize输入和输出
             input_encodings = tokenizer(
@@ -646,13 +668,7 @@ def construct_multihop_step_dataset(
                 truncation=True,
                 return_tensors="pt",
             )
-
-            # 选择hard negatives: 从paragraphs中除正例外的其他paragraph
-            # 获取所有非正例的文档索引
-            all_indices = set(range(len(candidates)))
-            positive_indices = set(hop_order[:step_idx+1])  # 包括当前步骤的正例
-            negative_indices = list(all_indices - positive_indices)
-
+            negative_indices = list(all_indices - positive_indices - set(concate_selected_negatives))
             # 如果有足够的negative，随机选择num_hard_negatives个
             if len(negative_indices) > num_hard_negatives:
                 selected_negatives = random.sample(negative_indices, num_hard_negatives)
@@ -983,10 +999,25 @@ if __name__ == "__main__":
     step_samples = construct_multihop_step_dataset(
         examples=combined_data,
         tokenizer=tokenizer,
-        max_length=data_args.max_length if hasattr(data_args, 'max_length') else 512,
+        max_length=data_args.max_length if hasattr(data_args, 'max_length') else 1024,
         num_hard_negatives=1,
     )
-    random.shuffle(step_samples)
+    n = len(step_samples)
+    keep_num = int(n * 2 / 7)  # 保留不打乱的样本数
+
+    # 随机选出要保留的位置
+    keep_indices = set(random.sample(range(n), keep_num))
+
+    # 取出其余需要打乱的元素
+    shuffle_values = [step_samples[i] for i in range(n) if i not in keep_indices]
+    random.shuffle(shuffle_values)
+
+    # 放回原列表，保留 keep_indices 对应位置不变
+    j = 0
+    for i in range(n):
+        if i not in keep_indices:
+            step_samples[i] = shuffle_values[j]
+            j += 1
     print(f"Total step samples: {len(step_samples)}")
 
     # 构建对比学习数据集
