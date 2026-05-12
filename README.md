@@ -15,10 +15,17 @@
 ---
 
 ## 📢 最新动态
+- 🆕 **2026年5月**: 引入更精细的训练样本设计和编码策略：
 
-- ✨ **2026年6月**: 发布初始版本，支持MuSiQue、2WikiMultiHopQA和HotpotQA数据集
-- 🚀 **2026年6月**: 实现基于InforNCE损失的多跳对比学习训练
-- 🎉 **2026年6月**: 完成IRCOT风格的多跳检索评估流程
+显式安排部分样本保持原始顺序，确保同一轨迹（trajectory）不会检索出重复文档
+Query和Document引入特殊符号区分语义信息与推理内容
+Ground Truth Document随机置于候选文档集合中的任意位置，而非固定首位
+在构建下一步检索时考虑非Ground Truth文档的干扰
+Value Aggregation (VA) 用于文档表征，Hidden State (HS) 用于Query的推理训练
+探索如何让模型感知目标为生成Subquery（当前HotpotQA未提供Subquery，可通过KL或其他方法进行Query推理训练尝试）
+- ✨ **2026年5月**: 发布初始版本，支持MuSiQue、2WikiMultiHopQA和HotpotQA数据集
+- 🚀 **2026年5月**: 实现基于InforNCE损失的多跳对比学习训练
+- 🎉 **2026年5月**: 完成IRCOT风格的多跳检索评估流程
 
 ## 🌟 功能特性
 
@@ -80,7 +87,7 @@
 |------|------|--------|----------|
 | 将所有多条检索数据集评估都完整跑通 | ⏳ 进行中 | @longtaizi13579 | 待定 |
 | 画出更清晰明了的创新点示意图 | ⏳ 进行中 | @longtaizi13579 | 待定 |
-| 使用该功能替换EverMemOS中的agentic search功能 | 📝 计划中 | @longtaizi13579 | 待定 |
+| 使用该功能替换EverMemOS中的agentic search功能 | ⏳ 进行中 | @longtaizi13579 | 待定 |
 | 使用EverMemOS基于LifeBench产生的记忆作为检索集进行评估 | 📝 计划中 | @longtaizi13579 | 待定 |
 | 将相关创新论文投稿至ICLR26 | 📝 计划中 | @longtaizi13579 | 待定 |
 
