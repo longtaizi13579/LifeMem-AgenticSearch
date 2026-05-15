@@ -29,7 +29,11 @@
 
 ## 🌟 功能特性
 
-本项目实现了一个基于对比学习的多跳检索系统，支持在多跳问答任务中进行迭代检索和评估。系统使用InforNCE损失训练检索模型，并支持在MuSiQue、2WikiMultiHopQA和HotpotQA等数据集上进行评估。
+本仓库面向多跳问答场景中的检索模块，主要用于训练一个能够支持多轮检索的编码器，并在 HotpotQA、2WikiMultiHopQA、MuSiQue 等多跳问答数据集上进行 IRCoT-style 迭代检索评估。
+
+当前代码重点关注 **retrieval-side evaluation**，而不是完整的问答生成系统。给定一个问题，系统会先检索第一跳相关文档；在后续跳中，系统将原始问题与已经检索到的文档拼接为新的查询，并继续检索新的候选文档。评估阶段主要统计文档级检索质量，例如 Recall、Precision、MRR，以及可选的顺序相关指标。
+
+该项目的长期目标是为实际应用中的 agentic search 提供更高效的检索组件，在减少多轮搜索时间开销的同时尽量保持检索质量。
 
 ### 核心功能
 
@@ -89,7 +93,7 @@
 | 画出更清晰明了的创新点示意图 | ⏳ 进行中 | @longtaizi13579 | 待定 |
 | 使用该功能替换EverMemOS中的agentic search功能 | ⏳ 进行中 | @longtaizi13579 | 待定 |
 | 使用EverMemOS基于LifeBench产生的记忆作为检索集进行评估 | 📝 计划中 | @longtaizi13579 | 待定 |
-| 将相关创新论文投稿至ICLR26 | 📝 计划中 | @longtaizi13579 | 待定 |
+| 将相关创新论文投稿至ICLR27 | 📝 计划中 | @longtaizi13579 | 待定 |
 
 </div>
 
@@ -97,15 +101,15 @@
 
 ```
 .
-├── models.py                          # 模型定义
-├── multihop_contrastive_train.py      # 训练脚本
-├── ircot_evaluation.py                # 评估脚本
-├── dataset_loading.py                 # 数据加载
-├── loss_utils.py                      # 损失函数
-├── pipeline_evaluation.sh                           # 评估脚本示例
-├── va_deepspeed_stage_new.json        # DeepSpeed配置
-├── results/                           # 结果目录
-└── wiki_train/                        # 训练日志
+├── models.py                         # 模型定义与编码器封装
+├── multihop_contrastive_train.py     # 多跳对比学习训练脚本
+├── ircot_evaluation.py               # IRCoT-style 多跳检索评估脚本
+├── dataset_loading.py                # 数据加载与样本构造
+├── loss_utils.py                     # 损失函数与训练相关工具
+├── pipeline_evaluation.sh            # 评估命令示例
+├── va_deepspeed_stage_new.json       # DeepSpeed 配置文件
+├── results/                          # 评估输出与文档索引目录
+└── wiki_train/                       # 训练日志或中间结果目录
 ```
 
 ## 🛠️ 环境配置
